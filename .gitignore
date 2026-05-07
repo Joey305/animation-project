@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local outputs
+results/
+SadTalker/results/
+
+# Model weights and downloaded assets
+SadTalker/checkpoints/
+gfpgan/weights/
+
+# Local temporary artifacts
+*.log
+__MACOSX/

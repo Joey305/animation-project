@@ -12,7 +12,8 @@ What it does:
 - Lets you choose an audio folder in the current working directory
 - If the chosen folder has one MP3, it uses it automatically
 - If the chosen folder has multiple MP3s, it asks which one to use
-- For long audio, splits on nearby silence into chunk lengths that target 45-50s
+- For long audio, splits on nearby silence into chunk lengths that target 45-60s
+- If there is no good pause in that window, it can stretch to 70s to catch one
 - Runs SadTalker inference for each chunk
 - Concatenates the chunk videos back into one final MP4
 - Saves output into ./results/<job_name>/
@@ -71,10 +72,12 @@ EXCLUDED_DIR_NAMES = {
 
 # Long-form chunking settings.
 MIN_CHUNK_MS = 45_000
-MAX_CHUNK_MS = 50_000
-TARGET_CHUNK_MS = 48_000
-MIN_SILENCE_LEN_MS = 350
+MAX_CHUNK_MS = 60_000
+MAX_STRETCH_CHUNK_MS = 70_000
+TARGET_CHUNK_MS = 55_000
+MIN_SILENCE_LEN_MS = 500
 SILENCE_SEEK_STEP_MS = 10
+SILENCE_THRESHOLD_OFFSET_DB = 20
 
 
 # -----------------------------
@@ -284,7 +287,7 @@ def choose_best_generated_video(result_dir: Path) -> Path | None:
 
 
 def detect_silence_midpoints(audio: AudioSegment) -> list[int]:
-    silence_thresh = audio.dBFS - 16
+    silence_thresh = audio.dBFS - SILENCE_THRESHOLD_OFFSET_DB
     silences = detect_silence(
         audio,
         min_silence_len=MIN_SILENCE_LEN_MS,
@@ -337,13 +340,13 @@ def rebalance_tail_chunk(
 
 def plan_audio_chunks(audio: AudioSegment) -> list[tuple[int, int]]:
     total_ms = len(audio)
-    if total_ms <= MAX_CHUNK_MS:
+    if total_ms <= MAX_STRETCH_CHUNK_MS:
         return [(0, total_ms)]
 
     if total_ms < MIN_CHUNK_MS * 2:
         info(
-            "Audio is longer than 50s but shorter than 90s, so it cannot be split into "
-            "all-45-50s chunks cleanly. Running it as one piece."
+            "Audio is longer than 70s but shorter than 90s, so it cannot be split into "
+            "all-45-60s chunks cleanly. Running it as one piece."
         )
         return [(0, total_ms)]
 
@@ -375,6 +378,19 @@ def plan_audio_chunks(audio: AudioSegment) -> list[tuple[int, int]]:
 
         target_end = min(max(start + ideal_duration, min_end), max_end)
         cut = choose_split_point(silence_midpoints, min_end, max_end, target_end)
+
+        if cut == max_end:
+            stretch_max_end = min(
+                start + MAX_STRETCH_CHUNK_MS,
+                total_ms - (remaining_chunks_after * MIN_CHUNK_MS),
+            )
+            stretch_candidates = [
+                midpoint for midpoint in silence_midpoints
+                if max_end < midpoint <= stretch_max_end
+            ]
+            if stretch_candidates:
+                cut = stretch_candidates[0]
+
         chunks.append((start, cut))
         start = cut
 
